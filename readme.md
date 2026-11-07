@@ -1,4 +1,4 @@
-# BurVision Dataset Builder (`marventun/burvision-dataset`)
+# BurVision Dataset Builder 
 
 An open-source synthetic data generation and document rendering pipeline for building high-resolution, layout-aware Burmese (Myanmar) OCR datasets with image and text annotations.
 
