@@ -1,25 +1,44 @@
-# BurVision Dataset Builder 
+# BurVision Dataset Builder
 
 An open-source synthetic data generation and document rendering pipeline for building high-resolution, layout-aware Burmese (Myanmar) OCR datasets with image and text annotations.
 
-**BurVision** automatically harvests **140+ free & open Myanmar Unicode fonts** across 4 major open-source font repositories ([AungMyoKyaw/Myanmar-Unicode-Fonts](https://github.com/AungMyoKyaw/Myanmar-Unicode-Fonts), [Google Fonts](https://github.com/google/fonts), [lecramyajiv/fonts-myanmar-extra](https://github.com/lecramyajiv/fonts-myanmar-extra), and [saturngod/myanmar-unicode-fonts](https://github.com/saturngod/myanmar-unicode-fonts)), combines **intra-page header + body font pairings**, formats long Burmese stories into structured A4 book pages with `#H1`, `#H2`, `#H3` hierarchy and inline styling, and renders them via **Headless Chromium/Edge (`mym2` HarfBuzz + DirectWrite)** for 100% authentic Burmese glyph shaping.
+**BurVision** automatically harvests **200+ free & open Myanmar Unicode fonts** across 4 major open-source font repositories ([AungMyoKyaw/Myanmar-Unicode-Fonts](https://github.com/AungMyoKyaw/Myanmar-Unicode-Fonts), [Google Fonts](https://github.com/google/fonts), [lecramyajiv/fonts-myanmar-extra](https://github.com/lecramyajiv/fonts-myanmar-extra), and [saturngod/myanmar-unicode-fonts](https://github.com/saturngod/myanmar-unicode-fonts)), and supports **dual-mode dataset generation** via **Headless Chromium/Edge (`mym2` HarfBuzz + DirectWrite)** for 100% authentic Burmese glyph shaping:
+
+1. **Page Mode (`"page"`):** Formats long Burmese stories into structured A4 book pages with `#H1`, `#H2`, `#H3` hierarchy, intra-page header + body font pairings, and realistic scan augmentations for Vision-Language Models (VLMs).
+2. **Line Mode (`"line"`):** Uses BurVision's `mym2` HarfBuzz renderer with an integrated augmentation pipeline (skew, wave distortion, blur, and multi-background synthesis) to produce single-line OCR crops and export directly to **PaddleOCR** and **Hugging Face `imagefolder`** formats.
+
+---
+
+## Sample Outputs
+
+### Full-Page Document Rendering (`page` mode)
+![Sample Burmese Book Page](samples/sample_page.png)
+
+### TRDG-Style Line Crops (`line` mode with `mym2` HarfBuzz shaping)
+![Sample Burmese Line Crops Grid](samples/sample_lines_grid.png)
+
+---
 
 ## 1. Key Architecture & Dataset Specifications
 
 | Feature | Specification |
 | :--- | :--- |
-| **Total Myanmar Unicode Fonts** | **140+ fonts** harvested across 4 repositories (`AungMyoKyaw/Myanmar-Unicode-Fonts`, `Google Fonts` full weights 100–900, `lecramyajiv/fonts-myanmar-extra`, `saturngod/myanmar-unicode-fonts`) |
+| **Pipeline Modes (`PIPELINE_MODE`)** | `"page"` (full A4 documents), `"line"` (TRDG-style line crops), or `"both"` |
+| **Total Myanmar Unicode Fonts** | **200+ fonts** harvested across 4 repositories (`AungMyoKyaw/Myanmar-Unicode-Fonts`, `Google Fonts` weights 100–900, `lecramyajiv/fonts-myanmar-extra`, `saturngod/myanmar-unicode-fonts`) |
 | **Intra-Page Font Pairing** | **Dual-Font Book Typography** (pages pair a dedicated display/bold Header Font for `#H1`/`#H2`/`#H3` with a distinct Body Font) |
-| **Ground Truth Labels** | **Rich Structural Markdown** (`#`, `##`, `###` headings, `**bold**`, `*italic*`, `<u>underline</u>`, `“...”` quotes) |
-| **Source Corpus** | **Synthetic Literary Corpus** generated via **Gemini 3.5 Flash-Lite** across 8 cultural, historical, and modern themes |
+| **Ground Truth & Exports** | **VLM JSONL** (`train.jsonl`, `val.jsonl`), **PaddleOCR** (`train.txt`, `val.txt`, `myanmar_dict.txt`), and **Hugging Face** (`metadata.csv`) |
+| **Source Corpus** | Local UTF-8 `.txt` files (`raw_texts/`), optional **Hugging Face Corpus Harvester** (`ENABLE_HF_CORPUS = True`), or synthetic literary stories |
 | **Shaping & Encoding Purity** | **100% Verified Pure Unicode 5.1+ (`NFC`)** (`paraencoder` auto-conversion + strict exclusion of non-Unicode Zawgyi/Win fonts + Browser `mym2` HarfBuzz shaping) |
-| **Realistic Scan Augmentation** | **Warm Book Paper + Spine Shadow + Micro-Rotation (`±0.5°`) + Sensor Grain** |
+| **Augmentations** | **Page:** Warm paper, spine shadow, micro-rotation (`±0.5°`), sensor grain • **Line:** TRDG-style skew, sine/cosine wave distortion, blur, Gaussian noise, gradient texture, and custom backgrounds |
 
-## 2. Synthetic Literary Corpus Generation (Gemini 3.5 Flash-Lite)
+## 2. Corpus Options (Local `.txt` or Hugging Face Harvester)
 
-This repository shares the dataset-generation workflow, not a bundled text corpus or generated dataset. The working folder `burmese_ocr_project/` is intentionally excluded from Git, so each person using the notebook supplies their own UTF-8 Burmese text files. The following optional prompt can be used with Gemini 3.5 Flash-Lite (or another text-generation tool) to create source stories.
+This repository shares the dataset-generation workflow and sample previews, not a bundled text corpus or generated dataset. The working folder `burmese_ocr_project/` is excluded from Git. You can supply text in two ways:
 
-### Master Prompt
+1. **Local `.txt` files:** Place UTF-8 `.txt` files in `burmese_ocr_project/raw_texts/`.
+2. **Hugging Face Corpus Harvester:** Set `ENABLE_HF_CORPUS = True` in Cell 4 to automatically download, normalize (`NFC`), and clean Burmese text from Hugging Face datasets (e.g., `chuuhtetnaing/wikipedia`).
+
+### Optional Synthetic Literary Prompt (Gemini)
 
 ```text
 System / Master Instruction:
@@ -48,41 +67,44 @@ In standard Myanmar Unicode (`NFC`), characters are stored in **logical phonetic
 
 Lightweight PDF/image libraries (such as PyMuPDF's `insert_htmlbox` or Pillow without `libraqm`/`fribidi.dll`) draw glyphs in raw memory order without running the OpenType **`mym2` (Myanmar v2)** shaping state machine—resulting in unshaped text where `ေ` and `ြ` appear on the wrong side of the consonant (`တေောင်`, `ပည်`).
 
-**BurVision solves this permanently** by serving all 140+ Unicode fonts over a local background HTTP thread to a single persistent **Headless Chrome / Microsoft Edge** instance via Selenium. The browser's native **HarfBuzz + DirectWrite** engine executes full OpenType `GSUB`/`GPOS` shaping at **~0.1 seconds per page** with zero external C/GTK installation steps on Windows, macOS, or Linux.
+**BurVision solves this permanently** by serving all 200+ Unicode fonts over a local background HTTP thread to a single persistent **Headless Chrome / Microsoft Edge** instance via Selenium. The browser's native **HarfBuzz + DirectWrite** engine executes full OpenType `GSUB`/`GPOS` shaping for both full pages and TRDG-style line crops with zero external C/GTK installation steps on Windows, macOS, or Linux.
 
-## 4. All 140+ Harvested Myanmar Unicode Fonts (4 Repositories)
+## 4. Harvested Myanmar Unicode Fonts (4 Repositories)
 
-The dataset builder automatically downloads, deduplicates, and verifies 140+ distinct Myanmar Unicode `.ttf`/`.otf` font files across four open-source collections while strictly blocking legacy non-Unicode encodings (`Zawgyi-One`, `WININNWA`, `Padauk-Zawgyi`):
+The dataset builder automatically downloads, deduplicates, and verifies 200+ distinct Myanmar Unicode `.ttf`/`.otf` font files across four open-source collections while strictly blocking legacy non-Unicode encodings (`Zawgyi-One`, `WININNWA`, `Padauk-Zawgyi`):
 
-1. **[AungMyoKyaw/Myanmar-Unicode-Fonts](https://github.com/AungMyoKyaw/Myanmar-Unicode-Fonts) (78 Pure Unicode Fonts):**
-   * *Official & Book Standards:* `pyidaungsu` (1.2, 1.3, regular), `mm3-multi-os`, `mm3_05-Jan-2011`, `mm3h`, `mm3sh`, `MM3_Paoh`, `Padauk`, `Padauk-bold`, `padauk-book`, `padauk-bookbold`, `PadaukGrandPro_v2`, `Padauk_Kyaungchikote`, `PadaukSagar`, `PadaukSgaw` (Regular, Bold, Book, BookBold), `MyanmarText (mmrtext, mmrtextb)`, `MyanmarTextMelano`, `TharLon`, `ThanLwin`, `WinUniInnwa`, `Parabaik20080421`, `Parabaik_UTN11-3`, `Yunghkio`, `MON3Anonta1`, `PangLong_2011feb7`, `myanmarcensus`.
-   * *Stylized, Editorial & Display Fonts:* `Cherry_Unicode`, `Jasmine_Unicode`, `KT_02`, `KT_03`, `MasterpieceUniRound`, `MyanmarAngoun`, `MyanmarBlack`, `MyanmarGantGaw`, `MyanmarKhway`, `MyanmarKuttar`, `MyanmarNayone`, `MyanmarNjaun`, `MyanmarPaOhOne`, `MIUI_Unicode`, `MyanmarPauklay`, `MyanmarPhetsot`, `MyanmarPixel`, `MyanmarPixelSmooth`, `MyanmarPonenyet`, `Myanmar_Punk`, `Myanmar_Rosemarry`, `MyanmarSabae`, `MyanmarSagar`, `MyanmarSansPro`, `MyanmarSquare`, `MyanmarSquareLight`, `MyanmarTagu`, `MyanmarTaungyi`, `MyanmarThuriya`, `MyanmarThuriya_volt`, `MyanmarYinmar`, `NK_Grand`, `NK_SSmart2`, `NK_SSmart3`, `NK_SSmart4`, `NamKhoneUnicode`, `Namkhon_Web_pro`, `PaohDragonApp`, `Samsung_Myanmar`, `Shan_Unicode`, `YoeYar-One` (Regular, Bold, Light).
-2. **[Google Fonts (`google/fonts`)](https://github.com/google/fonts) (16 Full-Spectrum Weight Fonts):**
-   * Complete weight spectrum (**Thin 100, ExtraLight 200, Light 300, Regular 400, Medium 500, SemiBold 600, Bold 700, ExtraBold 800, Black 900**) for both `NotoSansMyanmar` and `NotoSerifMyanmar`.
-3. **[lecramyajiv/fonts-myanmar-extra](https://github.com/lecramyajiv/fonts-myanmar-extra) (20+ Masterpiece & Debian/Slackware Extra Myanmar Fonts):**
-   * Includes `Masterpiece Spring Rev`, `Masterpiece Lakwel`, `Masterpiece CTL`, `Masterpiece Stadium`, `Masterpiece TawWin`, `Masterpiece UniHand`, `Masterpiece UniSans`, `Masterpiece UniSerif`, `Masterpiece UniType`, `Masterpiece YayChanzin`, `Myanmar Chatu`, `Myanmar ChatuLight`, `Myanmar HeadOne`, `Myanmar Khyay`, `Myanmar Sanpya`, `Myanmar Waso`, and `Kayphodu`.
-4. **[saturngod/myanmar-unicode-fonts](https://github.com/saturngod/myanmar-unicode-fonts) (30+ Community Designer Burmese Unicode Fonts):**
-   * Harvests additional community-designed Myanmar Unicode display, handwriting, and modern book fonts curated at [font.saturngod.net](https://font.saturngod.net/).
+1. **[AungMyoKyaw/Myanmar-Unicode-Fonts](https://github.com/AungMyoKyaw/Myanmar-Unicode-Fonts) (78 Pure Unicode Fonts)**
+2. **[Google Fonts (`google/fonts`)](https://github.com/google/fonts) (16 Full-Spectrum Weight Fonts — `NotoSansMyanmar` & `NotoSerifMyanmar` 100–900)**
+3. **[lecramyajiv/fonts-myanmar-extra](https://github.com/lecramyajiv/fonts-myanmar-extra) (20+ Masterpiece & Debian/Slackware Extra Myanmar Fonts)**
+4. **[saturngod/myanmar-unicode-fonts](https://github.com/saturngod/myanmar-unicode-fonts) (Community Designer Burmese Unicode Fonts)**
 
 ## 5. Repository Structure
 
 ```text
-burvision-dataset/
-├── readme.md                         # Workflow documentation and optional text-generation prompt
-├── burmese_ocr_dataset_builder.ipynb # Local dataset generator
-└── burmese_ocr_project/              # Created locally; excluded from Git
-   ├── raw_texts/                    # Add your UTF-8 .txt input files here
-   ├── fonts/                        # Downloaded fonts
-   └── dataset_output/               # Generated images, train.jsonl, and val.jsonl
+BurVision-Dataset-Builder/
+├── readme.md                              # Workflow documentation & sample previews
+├── burmese_ocr_dataset_builder.ipynb      # Dual-mode dataset generator (Page + Line/TRDG)
+├── samples/                               # Sample rendered outputs for preview
+│   ├── sample_page.png
+│   └── sample_lines_grid.png
+└── burmese_ocr_project/                   # Created locally; excluded from Git
+    ├── raw_texts/                         # Place UTF-8 .txt files here (or enable HF corpus)
+    ├── fonts/                             # Downloaded Myanmar Unicode fonts
+    ├── backgrounds/                       # Optional real images for TRDG background_type=3
+    └── dataset_output/
+        ├── images/                        # Rendered A4 page PNGs
+        ├── line_images/                   # Rendered TRDG-style line crop PNGs
+        ├── train.jsonl & val.jsonl        # VLM chat-format annotations
+        ├── paddleocr/                     # train.txt, val.txt, and myanmar_dict.txt
+        └── hf_dataset/                    # train/ & val/ folders with metadata.csv
 ```
-
-The shared repository contains the notebook and this README. When you run the notebook, it creates `burmese_ocr_project/` locally. That folder is ignored by Git and is not shared; put your own `.txt` files in `burmese_ocr_project/raw_texts/` before running the dataset-generation cells.
 
 ## 6. Build a Dataset from Your Own Text
 
-1. Clone or download this repository, then run the notebook's setup cells. They create `burmese_ocr_project/raw_texts/` locally; put one or more of your own UTF-8 `.txt` files there. Heading tags such as `#H1`, `#H2`, and `#H3` are optional.
-2. Open `burmese_ocr_dataset_builder.ipynb` and run the cells from top to bottom. The font harvester needs an internet connection, and rendering requires Chrome or Microsoft Edge.
-3. Find the generated page images and `train.jsonl` / `val.jsonl` files in `burmese_ocr_project/dataset_output/`.
+1. Clone or download this repository, then run the notebook's setup cells (`burmese_ocr_dataset_builder.ipynb`).
+2. Configure `PIPELINE_MODE` (`"page"`, `"line"`, or `"both"`) and optionally `ENABLE_HF_CORPUS` in Cell 4, or place UTF-8 `.txt` files in `burmese_ocr_project/raw_texts/`.
+3. Run the cells from top to bottom (requires internet for font harvesting and Chrome or Microsoft Edge for rendering).
+4. Find your exported datasets in `burmese_ocr_project/dataset_output/` (`train.jsonl`/`val.jsonl`, `paddleocr/`, and `hf_dataset/`).
 
 ## 7. Exporting & Publishing the Dataset
 
